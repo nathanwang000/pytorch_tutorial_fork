@@ -3,6 +3,17 @@ import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
 
+import MTL_OPT.lib.optimizer as optimizers
+from MTL_OPT.lib.utils import AverageMeter
+import argparse
+from sklearn.externals import joblib
+parser = argparse.ArgumentParser(description="opt")
+parser.add_argument('-o', type=str,
+                    help='optimizer', default='optimizers.Diff')
+args = parser.parse_args()
+loss_meter = AverageMeter()
+train_losses = []
+torch.set_num_threads(1)
 
 # Device configuration
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -59,7 +70,8 @@ model = ConvNet(num_classes).to(device)
 
 # Loss and optimizer
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+optimizer = eval(args.o)(model.parameters(), lr=learning_rate)
+#optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 # Train the model
 total_step = len(train_loader)
@@ -71,6 +83,8 @@ for epoch in range(num_epochs):
         # Forward pass
         outputs = model(images)
         loss = criterion(outputs, labels)
+        loss_meter.update(loss.item())
+        train_losses.append(loss.item())
         
         # Backward and optimize
         optimizer.zero_grad()
@@ -79,7 +93,7 @@ for epoch in range(num_epochs):
         
         if (i+1) % 100 == 0:
             print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}' 
-                   .format(epoch+1, num_epochs, i+1, total_step, loss.item()))
+                   .format(epoch+1, num_epochs, i+1, total_step, loss_meter.avg))
 
 # Test the model
 model.eval()  # eval mode (batchnorm uses moving mean/variance instead of mini-batch mean/variance)
@@ -98,3 +112,6 @@ with torch.no_grad():
 
 # Save the model checkpoint
 torch.save(model.state_dict(), 'model.ckpt')
+acc = correct / total * 100
+joblib.dump(train_losses,
+            "train_loss/{}.{:.2f}.train_losses".format(args.o.split('.')[-1], acc))
